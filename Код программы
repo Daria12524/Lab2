@@ -1,0 +1,769 @@
+#include <iostream>
+#include <string>
+#include <iomanip>
+#include <stdexcept>
+#include <limits>
+#include <algorithm>
+#include <windows.h>
+
+using namespace std;
+
+//  меню
+void showMenu();
+
+// Функция для проверки длины строки
+bool validateStringLength(const string& str, const string& fieldName, int maxLength = 40) {
+    if (str.length() > maxLength) {
+        cout << "Ошибка: " << fieldName << " не может превышать " << maxLength << " символов!" << endl;
+        cout << "Введено: " << str.length() << " символов" << endl;
+        return false;
+    }
+    return true;
+}
+
+// реализация стратегии 
+//  расчет стоимости
+class CostCalculationStrategy {
+public:
+    virtual ~CostCalculationStrategy() = default;
+    virtual double calculateCost(double baseCost) const = 0;
+    virtual string getStrategyName() const = 0;
+    virtual string getDescription() const = 0;
+};
+
+//  стратегия - без льгот
+class NoBenefitsStrategy : public CostCalculationStrategy {
+public:
+    double calculateCost(double baseCost) const override {
+        return baseCost; // Полная стоимость без скидок
+    }
+
+    string getStrategyName() const override {
+        return "Без льгот";
+    }
+
+    string getDescription() const override {
+        return "Оплата полной стоимости услуг";
+    }
+};
+
+//  стратегия  со льготами
+class WithBenefitsStrategy : public CostCalculationStrategy {
+private:
+    double discountPercent; // Процент скидки
+
+public:
+    WithBenefitsStrategy(double discount = 0.0) : discountPercent(discount) {
+        if (discount < 0 || discount > 100) {
+            throw invalid_argument("Скидка должна быть от 0 до 100%");
+        }
+    }
+
+    double calculateCost(double baseCost) const override {
+        return baseCost * (1 - discountPercent / 100.0); // Стоимость со скидкой
+    }
+
+    string getStrategyName() const override {
+        return "Со льготами";
+    }
+
+    string getDescription() const override {
+        return "Оплата со скидкой " + to_string((int)discountPercent) + "%";
+    }
+
+    double getDiscountPercent() const { return discountPercent; }
+    void setDiscountPercent(double discount) {
+        if (discount >= 0 && discount <= 100) {
+            discountPercent = discount;
+        }
+    }
+};
+
+//  КЛАСС УСЛУГА 
+class Service {
+private:
+    string name;
+    double baseCost;
+
+public:
+    Service() : name("Коммунальные услуги"), baseCost(2500.0) {}
+
+    Service(const string& serviceName, double cost) : name(serviceName), baseCost(cost) {
+        if (cost < 0) {
+            throw invalid_argument("Стоимость услуги не может быть отрицательной");
+        }
+        if (!validateStringLength(serviceName, "Название услуги")) {
+            throw invalid_argument("Название услуги превышает допустимую длину");
+        }
+    }
+
+    string getName() const { return name; }
+    double getBaseCost() const { return baseCost; }
+
+    void displayInfo() const {
+        cout << "Услуга: " << name << ", базовая стоимость: " << fixed << setprecision(2)
+            << baseCost << " руб." << endl;
+    }
+};
+
+//  КЛАСС ЖИЛЕЦ
+class Resident {
+private:
+    string lastName;
+    string firstName;
+    string address;
+    CostCalculationStrategy* costStrategy; // Стратегия расчета стоимости
+
+public:
+    // Конструктор по умолчанию
+    Resident() : lastName("Иванов"), firstName("Иван"), address("ул. Ленина, 1") {
+        costStrategy = new NoBenefitsStrategy(); // По умолчанию без льгот
+    }
+
+    // Основной конструктор
+    Resident(const string& last, const string& first, const string& addr,
+        CostCalculationStrategy* strategy)
+        : lastName(last), firstName(first), address(addr), costStrategy(strategy) {
+        validateData(last, first, addr);
+    }
+
+    //  копирование
+    Resident(const Resident& other)
+        : lastName(other.lastName), firstName(other.firstName), address(other.address) {
+        // Глубокое копирование стратегии
+        if (dynamic_cast<NoBenefitsStrategy*>(other.costStrategy)) {
+            costStrategy = new NoBenefitsStrategy();
+        }
+        else if (auto benefited = dynamic_cast<WithBenefitsStrategy*>(other.costStrategy)) {
+            costStrategy = new WithBenefitsStrategy(benefited->getDiscountPercent());
+        }
+        else {
+            costStrategy = new NoBenefitsStrategy();
+        }
+    }
+
+    // Оператор присваивания
+    Resident& operator=(const Resident& other) {
+        if (this != &other) {
+            lastName = other.lastName;
+            firstName = other.firstName;
+            address = other.address;
+
+            // Освобождаем старую стратегию
+            delete costStrategy;
+
+            // Глубокое копирование стратегии
+            if (dynamic_cast<NoBenefitsStrategy*>(other.costStrategy)) {
+                costStrategy = new NoBenefitsStrategy();
+            }
+            else if (auto benefited = dynamic_cast<WithBenefitsStrategy*>(other.costStrategy)) {
+                costStrategy = new WithBenefitsStrategy(benefited->getDiscountPercent());
+            }
+            else {
+                costStrategy = new NoBenefitsStrategy();
+            }
+        }
+        return *this;
+    }
+
+    // Деструктор
+    ~Resident() {
+        delete costStrategy;
+    }
+
+private:
+    void validateData(const string& last, const string& first, const string& addr) {
+        if (last.empty() || first.empty() || addr.empty()) {
+            throw invalid_argument("ФИО и адрес не могут быть пустыми");
+        }
+        if (!validateStringLength(last, "Фамилия")) {
+            throw invalid_argument("Фамилия превышает допустимую длину");
+        }
+        if (!validateStringLength(first, "Имя")) {
+            throw invalid_argument("Имя превышает допустимую длину");
+        }
+        if (!validateStringLength(addr, "Адрес")) {
+            throw invalid_argument("Адрес превышает допустимую длину");
+        }
+    }
+
+public:
+    // Рассчитать стоимость услуги с использованием стратегии
+    double calculateServiceCost(const Service& service) const {
+        return costStrategy->calculateCost(service.getBaseCost());
+    }
+
+    // Показать информацию о жильце
+    void displayInfo() const {
+        cout << "========================================" << endl;
+        cout << "          ИНФОРМАЦИЯ О ЖИЛЬЦЕ" << endl;
+        cout << "========================================" << endl;
+        cout << "ФИО:          " << lastName << " " << firstName << endl;
+        cout << "Адрес:        " << address << endl;
+        cout << "Тип расчета:  " << costStrategy->getStrategyName() << endl;
+        cout << "Описание:     " << costStrategy->getDescription() << endl;
+        cout << "========================================" << endl;
+    }
+
+    // Смена стратегии (например, при предоставлении льгот)
+    void setCostStrategy(CostCalculationStrategy* newStrategy) {
+        if (newStrategy) {
+            delete costStrategy;
+            costStrategy = newStrategy;
+        }
+    }
+
+    // Геттеры
+    string getLastName() const { return lastName; }
+    string getFirstName() const { return firstName; }
+    string getAddress() const { return address; }
+    string getFullName() const { return lastName + " " + firstName; }
+    const CostCalculationStrategy* getCostStrategy() const { return costStrategy; }
+
+    // Проверка типа стратегии
+    bool hasBenefits() const {
+        return dynamic_cast<WithBenefitsStrategy*>(costStrategy) != nullptr;
+    }
+
+    //  размер скидки 
+    double getDiscountPercent() const {
+        if (auto benefited = dynamic_cast<WithBenefitsStrategy*>(costStrategy)) {
+            return benefited->getDiscountPercent();
+        }
+        return 0.0;
+    }
+};
+
+// синглетон 
+class ZhESManager {
+private:
+    static const int MAX_RESIDENTS = 100;
+    static const int MAX_SERVICES = 10;
+
+    Resident* residents[MAX_RESIDENTS];
+    Service services[MAX_SERVICES];
+    int residentCount;
+    int serviceCount;
+
+    // Приватный конструктор для Singleton
+    ZhESManager() : residentCount(0), serviceCount(0) {
+        // Добавляем базовые услуги
+        services[serviceCount++] = Service("Коммунальные услуги", 2500.0);
+        services[serviceCount++] = Service("Вывоз мусора", 500.0);
+        services[serviceCount++] = Service("Лифтовое обслуживание", 800.0);
+        services[serviceCount++] = Service("Уборка территории", 1200.0);
+
+        // УДАЛЕНЫ ТЕСТОВЫЕ ЖИЛЬЦЫ
+    }
+    // Запрещаем копирование
+    ZhESManager(const ZhESManager&) = delete;
+    ZhESManager& operator=(const ZhESManager&) = delete;
+
+public:
+    //  Singleton
+    static ZhESManager& getInstance() {
+        static ZhESManager instance;
+        return instance;
+    }
+    // Деструктор
+    ~ZhESManager() {
+        cout << "\nДеструктор ZhESManager: освобождение памяти..." << endl;
+        for (int i = 0; i < residentCount; i++) {
+            delete residents[i];
+        }
+        cout << "Деструктор ZhESManager: освобождена память для " << residentCount << " жильцов" << endl;
+    }
+
+    // Добавить жильца
+    bool addResident(const Resident& resident) {
+        if (residentCount >= MAX_RESIDENTS) {
+            cout << "Ошибка: достигнуто максимальное количество жильцов!" << endl;
+            return false;
+        }
+
+        // Проверяем уникальность адреса
+        for (int i = 0; i < residentCount; i++) {
+            if (residents[i]->getAddress() == resident.getAddress()) {
+                cout << "Ошибка: жилец с таким адресом уже существует!" << endl;
+                return false;
+            }
+        }
+
+        residents[residentCount++] = new Resident(resident);
+        return true;
+    }
+
+    // Добавить услугу
+    bool addService(const Service& service) {
+        if (serviceCount >= MAX_SERVICES) {
+            cout << "Ошибка: достигнуто максимальное количество услуг!" << endl;
+            return false;
+        }
+        services[serviceCount++] = service;
+        return true;
+    }
+
+    // Найти жильца по фамилии (нечувствительно к регистру)
+    Resident* findResidentByLastName(const string& lastName) {
+        if (residentCount == 0) {
+            return nullptr;
+        }
+
+        string searchName = lastName;
+
+        for (int i = 0; i < residentCount; i++) {
+            string residentLastName = residents[i]->getLastName();
+
+            // Простое сравнение без преобразования регистра
+            if (residentLastName == searchName) {
+                return residents[i];
+            }
+        }
+        return nullptr;
+    }
+    // Показать всех жильцов
+    void displayAllResidents() const {
+        if (residentCount == 0) {
+            cout << "Список жильцов пуст!" << endl;
+            return;
+        }
+
+        cout << "\n=== ВСЕ ЖИЛЬЦЫ ===" << endl;
+        for (int i = 0; i < residentCount; i++) {
+            residents[i]->displayInfo();
+            cout << endl;
+        }
+    }
+
+    // Показать всех жильцов (краткая версия для отладки)
+    void displayAllResidentsShort() const {
+        if (residentCount == 0) {
+            cout << "Список жильцов пуст!" << endl;
+            return;
+        }
+
+        cout << "\n=== СПИСОК ВСЕХ ЖИЛЬЦОВ ===" << endl;
+        for (int i = 0; i < residentCount; i++) {
+            cout << i + 1 << ". " << residents[i]->getLastName() << " "
+                << residents[i]->getFirstName() << " - "
+                << residents[i]->getAddress() << " ("
+                << residents[i]->getCostStrategy()->getStrategyName() << ")" << endl;
+        }
+    }
+
+    // Показать все услуги
+    void displayAllServices() const {
+        if (serviceCount == 0) {
+            cout << "Список услуг пуст!" << endl;
+            return;
+        }
+
+        cout << "\n=== ВСЕ УСЛУГИ ===" << endl;
+        for (int i = 0; i < serviceCount; i++) {
+            cout << (i + 1) << ". ";
+            services[i].displayInfo();
+        }
+    }
+
+    // МЕТОД ПОДСЧЕТА СТОИМОСТИ ВСЕХ ОКАЗАННЫХ УСЛУГ (основное требование задания)
+    double calculateTotalServicesCost() const {
+        if (residentCount == 0) {
+            return 0.0;
+        }
+
+        double total = 0.0;
+        for (int i = 0; i < residentCount; i++) {
+            for (int j = 0; j < serviceCount; j++) {
+                total += residents[i]->calculateServiceCost(services[j]);
+            }
+        }
+        return total;
+    }
+
+    // Подсчет стоимости услуг по типу стратегии
+    double calculateServicesCostByStrategyType(bool withBenefits) const {
+        if (residentCount == 0) {
+            return 0.0;
+        }
+
+        double total = 0.0;
+        for (int i = 0; i < residentCount; i++) {
+            if (residents[i]->hasBenefits() == withBenefits) {
+                for (int j = 0; j < serviceCount; j++) {
+                    total += residents[i]->calculateServiceCost(services[j]);
+                }
+            }
+        }
+        return total;
+    }
+
+    // Показать статистику
+    void displayStatistics() const {
+        if (residentCount == 0) {
+            cout << "Список жильцов пуст! Нет данных для статистики." << endl;
+            return;
+        }
+
+        int regularCount = 0;
+        int benefitedCount = 0;
+
+        for (int i = 0; i < residentCount; i++) {
+            if (residents[i]->hasBenefits()) {
+                benefitedCount++;
+            }
+            else {
+                regularCount++;
+            }
+        }
+
+        double totalCost = calculateTotalServicesCost();
+        double regularCost = calculateServicesCostByStrategyType(false);
+        double benefitedCost = calculateServicesCostByStrategyType(true);
+
+        cout << "\n=== СТАТИСТИКА ЖЭС ===" << endl;
+        cout << "Общее количество жильцов: " << residentCount << endl;
+        cout << "Жильцов без льгот: " << regularCount << endl;
+        cout << "Жильцов со льготами: " << benefitedCount << endl;
+        cout << "Количество услуг: " << serviceCount << endl;
+        cout << "Общая стоимость услуг: " << fixed << setprecision(2) << totalCost << " руб." << endl;
+        cout << "Стоимость услуг для жильцов без льгот: " << regularCost << " руб." << endl;
+        cout << "Стоимость услуг для жильцов со льготами: " << benefitedCost << " руб." << endl;
+
+        if (totalCost > 0) {
+            double discountPercentage = (benefitedCost / totalCost) * 100.0;
+            cout << "Доля льготных услуг: " << setprecision(1) << discountPercentage << "%" << endl;
+        }
+    }
+
+    // Геттеры
+    int getResidentCount() const { return residentCount; }
+    int getServiceCount() const { return serviceCount; }
+    const Service& getService(int index) const {
+        if (index >= 0 && index < serviceCount) {
+            return services[index];
+        }
+        throw out_of_range("Неверный индекс услуги");
+    }
+};
+
+// -------------------- ФУНКЦИИ ДЛЯ ВВОДА ДАННЫХ --------------------
+
+bool containsOnlyLettersAndSpaces(const string& str) {
+    if (str.empty()) return false;
+    for (char c : str) {
+        if (isspace(c) || c == '-') continue;
+        if (!isalpha(c) && static_cast<unsigned char>(c) < 128) {
+            return false;
+        }
+    }
+    return true;
+}
+
+string inputString(const string& prompt, bool checkLetters = false, int maxLength = 40) {
+    string value;
+    while (true) {
+        cout << prompt;
+        getline(cin, value);
+
+        if (value.empty() || value.find_first_not_of(' ') == string::npos) {
+            cout << "Ошибка: ввод не может быть пустым" << endl;
+            continue;
+        }
+
+        if (!validateStringLength(value, "Поле ввода", maxLength)) {
+            continue;
+        }
+
+        if (checkLetters && !containsOnlyLettersAndSpaces(value)) {
+            cout << "Ошибка: можно использовать только буквы и пробелы!" << endl;
+            continue;
+        }
+
+        return value;
+    }
+}
+
+int inputInt(const string& prompt, int minVal = 0, int maxVal = 100) {
+    int value;
+    while (true) {
+        cout << prompt;
+        string input;
+        getline(cin, input);
+
+        if (input.empty()) {
+            cout << "Ошибка: ввод не может быть пустым" << endl;
+            continue;
+        }
+
+        try {
+            size_t pos;
+            value = stoi(input, &pos);
+            if (pos != input.length()) {
+                cout << "Ошибка: введите целое число без лишних символов!" << endl;
+                continue;
+            }
+            if (value < minVal || value > maxVal) {
+                cout << "Ошибка: число должно быть от " << minVal << " до " << maxVal << "!" << endl;
+            }
+            else {
+                return value;
+            }
+        }
+        catch (const exception&) {
+            cout << "Ошибка: введите целое число!" << endl;
+        }
+    }
+}
+
+double inputDouble(const string& prompt, double minVal = 0, double maxVal = 100) {
+    double value;
+    while (true) {
+        cout << prompt;
+        string input;
+        getline(cin, input);
+
+        if (input.empty()) {
+            cout << "Ошибка: ввод не может быть пустым" << endl;
+            continue;
+        }
+
+        try {
+            size_t pos;
+            value = stod(input, &pos);
+            if (pos != input.length()) {
+                cout << "Ошибка: введите число без лишних символов!" << endl;
+                continue;
+            }
+            if (value < minVal || value > maxVal) {
+                cout << "Ошибка: число должно быть от " << fixed << setprecision(2) << minVal << " до " << maxVal << "!" << endl;
+            }
+            else {
+                return value;
+            }
+        }
+        catch (const exception&) {
+            cout << "Ошибка: введите число!" << endl;
+        }
+    }
+}
+
+// Функция для выбора стратегии
+CostCalculationStrategy* selectCostStrategy() {
+    int choice;
+    while (true) {
+        cout << "Выберите тип жильца:" << endl;
+        cout << "1 - Без льгот (полная оплата)" << endl;
+        cout << "2 - Со льготами (со скидкой)" << endl;
+        cout << "Ваш выбор: ";
+
+        string input;
+        getline(cin, input);
+
+        if (input.empty()) {
+            cout << "Ошибка: ввод не может быть пустым" << endl;
+            continue;
+        }
+
+        if (input.length() == 1 && (input[0] == '1' || input[0] == '2')) {
+            choice = input[0] - '0';
+            if (choice == 1) {
+                return new NoBenefitsStrategy();
+            }
+            else {
+                double discount = inputDouble("Введите размер скидки (%): ", 0, 100);
+                return new WithBenefitsStrategy(discount);
+            }
+        }
+        else {
+            cout << "Ошибка: выберите 1 или 2!" << endl;
+        }
+    }
+}
+
+// -------------------- ФУНКЦИИ МЕНЮ --------------------
+void showMenu() {
+    cout << "\n=== СИСТЕМА УПРАВЛЕНИЯ ЖЭС ===" << endl;
+    cout << "1. Показать всех жильцов" << endl;
+    cout << "2. Добавить жильца" << endl;
+    cout << "3. Найти жильца по фамилии" << endl;
+    cout << "4. Показать все услуги" << endl;
+    cout << "5. Добавить услугу" << endl;
+    cout << "6. Рассчитать стоимость услуг для жильца" << endl;
+    cout << "7. Показать статистику" << endl;
+    cout << "8. Изменить тип льготы" << endl;
+    cout << "0. Выход" << endl;
+}
+
+int inputMenuChoice() {
+    int choice;
+    while (true) {
+        cout << "Выберите действие: ";
+        string input;
+        getline(cin, input);
+
+        if (input.empty()) {
+            cout << "Ошибка: ввод не может быть пустым" << endl;
+            continue;
+        }
+
+        if (input.length() == 1 && input[0] >= '0' && input[0] <= '9') {
+            return input[0] - '0';
+        }
+        else {
+            cout << "Ошибка: введите число от 0 до 8!" << endl;
+        }
+    }
+}
+
+// -------------------- ОСНОВНАЯ ФУНКЦИЯ --------------------
+int main() {
+    // Устанавливаем кодировки для правильного отображения русских символов
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
+    setlocale(LC_ALL, "Russian");
+
+    ZhESManager& manager = ZhESManager::getInstance();
+    int choice;
+
+    do {
+        showMenu();
+        choice = inputMenuChoice();
+
+        try {
+            switch (choice) {
+            case 1: {
+                manager.displayAllResidents();
+                break;
+            }
+            case 2: {
+                cout << "\n=== ДОБАВЛЕНИЕ НОВОГО ЖИЛЬЦА ===" << endl;
+                string lastName = inputString("Введите фамилию: ", true);
+                string firstName = inputString("Введите имя: ", true);
+                string address = inputString("Введите адрес: ");
+
+                CostCalculationStrategy* strategy = selectCostStrategy();
+                Resident newResident(lastName, firstName, address, strategy);
+
+                if (manager.addResident(newResident)) {
+                    cout << "Жилец успешно добавлен!" << endl;
+                }
+                break;
+            }
+            case 3: {
+                cout << "\n=== ПОИСК ЖИЛЬЦА ПО ФАМИЛИИ ===" << endl;
+                if (manager.getResidentCount() == 0) {
+                    cout << "Список жильцов пуст!" << endl;
+                    break;
+                }
+
+                string lastName = inputString("Введите фамилию: ", true);
+                Resident* found = manager.findResidentByLastName(lastName);
+                if (found) {
+                    cout << "Жилец найден!" << endl;
+                    found->displayInfo();
+                }
+                else {
+                    cout << "Жилец с фамилией '" << lastName << "' не найден!" << endl;
+                }
+                break;
+            }
+            case 4: {
+                manager.displayAllServices();
+                break;
+            }
+            case 5: {
+                cout << "\n=== ДОБАВЛЕНИЕ НОВОЙ УСЛУГИ ===" << endl;
+                string name = inputString("Введите название услуги: ");
+                double cost = inputDouble("Введите стоимость услуги: ", 0, 100000);
+
+                Service newService(name, cost);
+                if (manager.addService(newService)) {
+                    cout << "Услуга успешно добавлена!" << endl;
+                }
+                break;
+            }
+            case 6: {
+                cout << "\n=== РАСЧЕТ СТОИМОСТИ УСЛУГ ===" << endl;
+                if (manager.getResidentCount() == 0) {
+                    cout << "Список жильцов пуст! Не для кого рассчитывать стоимость." << endl;
+                    break;
+                }
+
+                string lastName = inputString("Введите фамилию жильца: ", true);
+                Resident* resident = manager.findResidentByLastName(lastName);
+
+                if (resident) {
+                    cout << "\nРасчет стоимости услуг для: " << resident->getFullName() << endl;
+                    cout << "Стратегия расчета: " << resident->getCostStrategy()->getDescription() << endl;
+                    double totalCost = 0.0;
+
+                    for (int i = 0; i < manager.getServiceCount(); i++) {
+                        double cost = resident->calculateServiceCost(manager.getService(i));
+                        cout << manager.getService(i).getName() << ": "
+                            << fixed << setprecision(2) << cost << " руб." << endl;
+                        totalCost += cost;
+                    }
+
+                    cout << "----------------------------------------" << endl;
+                    cout << "ОБЩАЯ СТОИМОСТЬ: " << totalCost << " руб." << endl;
+                }
+                else {
+                    cout << "Жилец не найден!" << endl;
+                }
+                break;
+            }
+            case 7: {
+                cout << "\n=== ОБЩАЯ СТАТИСТИКА ЖЭС ===" << endl;
+                if (manager.getResidentCount() == 0) {
+                    cout << "Список жильцов пуст! Нет данных для статистики." << endl;
+                    break;
+                }
+
+                double totalCost = manager.calculateTotalServicesCost();
+                cout << "Общая стоимость всех оказанных услуг: "
+                    << fixed << setprecision(2) << totalCost << " руб." << endl;
+                manager.displayStatistics();
+                break;
+            }
+            case 8: {
+                cout << "\n=== ИЗМЕНЕНИЕ ТИПА ЖИЛЬЦА ===" << endl;
+                if (manager.getResidentCount() == 0) {
+                    cout << "Список жильцов пуст! Не для кого изменять тип льготы." << endl;
+                    break;
+                }
+
+                string lastName = inputString("Введите фамилию жильца: ", true);
+                Resident* resident = manager.findResidentByLastName(lastName);
+
+                if (resident) {
+                    cout << "Текущий тип: " << resident->getCostStrategy()->getDescription() << endl;
+                    CostCalculationStrategy* newStrategy = selectCostStrategy();
+                    resident->setCostStrategy(newStrategy);
+                    cout << "Тип жильца успешно изменен!" << endl;
+                    cout << "Новый тип: " << resident->getCostStrategy()->getDescription() << endl;
+                }
+                else {
+                    cout << "Жилец не найден!" << endl;
+                }
+                break;
+            }
+
+            case 0: {
+                cout << "Выход из программы..." << endl;
+                break;
+            }
+            default: {
+                cout << "Неверный выбор меню!" << endl;
+                break;
+            }
+            }
+        }
+        catch (const exception& e) {
+            cerr << "Ошибка: " << e.what() << endl;
+        }
+
+    } while (choice != 0);
+
+    cout << "РАБОТА ПРОГРАММЫ ЗАВЕРШЕНА" << endl;
+    return 0;
+}
